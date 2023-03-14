@@ -38,6 +38,14 @@ def download_awzi_population_mappings_2021():
 
     return df_rwzi
 
+@cached_results(key='cbs_awzi_population_mappings_2022', invalidate_after=invalidate_beginning_of_next_month(), cache_level='backend')
+def download_awzi_population_mappings_2022():
+    mapping_excel = 'https://www.cbs.nl/-/media/_excel/2022/42/aantal-inwoners-per-rwzi-verzorgingsgebied-2022.xlsx'
+    sheet = 'Tabel 1'
+    df_rwzi = pd.read_excel(download_file_with_progressbar(mapping_excel), sheet)
+
+    return df_rwzi
+
 
 @cached_results(key='rivm_sewage_data', invalidate_after=invalidate_after_time_for_tz(*rivm_update_time), cache_level='backend')
 def download_sewage_data():
@@ -139,13 +147,16 @@ def get_rwzi_mappings_2021(measurement_date, rwzi_number, df_rwzi_2021):
     return ret
 
 
-def get_rwzi_mappings(measurement_date, rwzi_number, idx, df_rwzi_2020, vrcols_2020, gmcols_2020, df_rwzi_2021):
+def get_rwzi_mappings(measurement_date, rwzi_number, idx, df_rwzi_2020, vrcols_2020, gmcols_2020, df_rwzi_2021, df_rwzi_2022):
     ret = None
 
     if measurement_date.year == 2020:
         ret = get_rwzi_mappings_2020(rwzi_number, df_rwzi_2020, vrcols_2020, gmcols_2020)
-    elif measurement_date.year > 2020:
+    elif measurement_date.year > 2020 and measurement_date.year <= 2021:
         ret = get_rwzi_mappings_2021(measurement_date, rwzi_number, df_rwzi_2021)
+    else:
+        # rwzi 2022 uses the same format as 2021 so we can reuse the 2021 function on 2022 data
+        ret = get_rwzi_mappings_2021(measurement_date, rwzi_number, df_rwzi_2022)
 
         # if it doesn't exist, it's probably in the 2020 dataset
         if ret is None:
@@ -157,16 +168,17 @@ def get_rwzi_mappings(measurement_date, rwzi_number, idx, df_rwzi_2020, vrcols_2
     return ret
 
 
-def _rwzi_mappings_worker(rows, df_rwzi_2020, vrcols_2020, gmcols_2020, df_rwzi_2021):
+def _rwzi_mappings_worker(rows, df_rwzi_2020, vrcols_2020, gmcols_2020, df_rwzi_2021, df_rwzi_2022):
     retvals = []
     for idx, row in rows.iterrows():
-        retvals.append(get_rwzi_mappings(row['Date_measurement'], row['RWZI_AWZI_code'], idx, df_rwzi_2020, vrcols_2020, gmcols_2020, df_rwzi_2021))
+        retvals.append(get_rwzi_mappings(row['Date_measurement'], row['RWZI_AWZI_code'], idx, df_rwzi_2020, vrcols_2020, gmcols_2020, df_rwzi_2021, df_rwzi_2022))
 
     return retvals
 
 
 @cached_results(key='merged_mapping_rwzi_gmvr', invalidate_after=invalidate_after_time_for_tz(*rivm_update_time), cache_level='backend')
 def map_merge_rwzi_gmvr(df_rwzi_gm_vr, jobs):
+    df_rwzi_2022 = get_df_rwzi_2022()
     df_rwzi_2021 = get_df_rwzi_2021()
     df_rwzi_2020, vrcols_2020, gmcols_2020 = get_df_rwzi_2020()
 
@@ -179,7 +191,7 @@ def map_merge_rwzi_gmvr(df_rwzi_gm_vr, jobs):
         #     delayed(get_rwzi_mappings)(row['Date_measurement'], row['RWZI_AWZI_code'], idx, df_rwzi_2020, vrcols_2020, gmcols_2020, df_rwzi_2021) for idx, row in df_rwzi_gm_vr.iterrows()
         # )
         retvals = Parallel(n_jobs=jobs)(
-            delayed(_rwzi_mappings_worker)(rows, df_rwzi_2020, vrcols_2020, gmcols_2020, df_rwzi_2021) for rows in chunks
+            delayed(_rwzi_mappings_worker)(rows, df_rwzi_2020, vrcols_2020, gmcols_2020, df_rwzi_2021, df_rwzi_2022) for rows in chunks
         )
 
 
@@ -258,6 +270,12 @@ def get_df_rwzi_2021():
     df_rwzi_2021 = download_awzi_population_mappings_2021()
 
     return df_rwzi_2021
+
+@lru_cache()
+def get_df_rwzi_2022():
+    df_rwzi_2022 = download_awzi_population_mappings_2022()
+
+    return df_rwzi_2022
 
 
 @cached_results(key='get_geodata_gemeentes', invalidate_after=invalidate_beginning_of_next_month(), cache_level='backend')
